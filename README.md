@@ -1,9 +1,13 @@
-# Gmail AutoAuth MCP Server
+# Gmail MCP Server
 
 A Model Context Protocol (MCP) server for Gmail integration in Claude Desktop with auto authentication support. This server enables AI assistants to manage Gmail through natural language interactions.
 
 ![](https://badge.mcpx.dev?type=server 'MCP Server')
 [![smithery badge](https://smithery.ai/badge/@gongrzhe/server-gmail-autoauth-mcp)](https://smithery.ai/server/@gongrzhe/server-gmail-autoauth-mcp)
+
+## Credits
+
+This is a fork of [GongRzhe/Gmail-MCP-Server](https://github.com/GongRzhe/Gmail-MCP-Server). The original repository provides comprehensive Gmail API integration with OAuth2 authentication.
 
 
 ## Features
@@ -88,6 +92,26 @@ npx -y @smithery/cli install @gongrzhe/server-gmail-autoauth-mcp --client claude
    > - For Web application credentials, make sure to add `http://localhost:3000/oauth2callback` to your authorized redirect URIs
 
 3. Configure in Claude Desktop:
+
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "gmail": {
+      "command": "npx",
+      "args": [
+        "@gongrzhe/server-gmail-autoauth-mcp"
+      ]
+    }
+  }
+}
+```
+
+### Cursor Configuration
+
+Add to your Cursor MCP settings (typically `~/.cursor/mcp.json` or Cursor settings):
 
 ```json
 {
