@@ -48,7 +48,7 @@ cp ~/Downloads/client_secret_*.json ~/.gmail-mcp/gcp-oauth.keys.json
 
 ### Step 6: Authenticate
 ```bash
-cd /Users/markmhendrickson/Projects/personal/mcp-servers/gmail
+cd mcp-servers/gmail
 node dist/index.js auth
 ```
 

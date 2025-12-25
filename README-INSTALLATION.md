@@ -2,7 +2,7 @@
 
 ## Installation Status
 
-✅ **Successfully installed** to `/Users/markmhendrickson/Projects/personal/mcp-servers/gmail`
+✅ **Successfully installed** to `mcp-servers/gmail`
 
 ## Dependencies
 
@@ -43,7 +43,7 @@ Add to your Cursor MCP settings (`~/.cursor/mcp.json`):
     "gmail": {
       "command": "node",
       "args": [
-        "/Users/markmhendrickson/Projects/personal/mcp-servers/gmail/dist/index.js"
+        "mcp-servers/gmail/dist/index.js"
       ]
     }
   }
@@ -82,7 +82,7 @@ Or use npx (recommended):
 
 3. Authenticate:
    ```bash
-   cd /Users/markmhendrickson/Projects/personal/mcp-servers/gmail
+   cd mcp-servers/gmail
    npm run build
    node dist/index.js auth
    ```

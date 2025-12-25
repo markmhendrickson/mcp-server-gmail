@@ -14,7 +14,7 @@
 Copy the configuration from `CURSOR_CONFIG.json` to `~/.cursor/mcp.json`:
 
 ```bash
-cp /Users/markmhendrickson/Projects/personal/mcp-servers/gmail/CURSOR_CONFIG.json ~/.cursor/mcp.json
+cp mcp-servers/gmail/CURSOR_CONFIG.json ~/.cursor/mcp.json
 ```
 
 Or manually edit `~/.cursor/mcp.json` and add:
@@ -25,14 +25,14 @@ Or manually edit `~/.cursor/mcp.json` and add:
     "parquet": {
       "command": "python3",
       "args": [
-        "/Users/markmhendrickson/Projects/personal/mcp-servers/parquet/parquet_mcp_server.py"
+        "mcp-servers/parquet/parquet_mcp_server.py"
       ],
       "env": {}
     },
     "gmail": {
       "command": "node",
       "args": [
-        "/Users/markmhendrickson/Projects/personal/mcp-servers/gmail/dist/index.js"
+        "mcp-servers/gmail/dist/index.js"
       ]
     }
   }
@@ -74,7 +74,7 @@ Or manually edit `~/.cursor/mcp.json` and add:
 Run the authentication command:
 
 ```bash
-cd /Users/markmhendrickson/Projects/personal/mcp-servers/gmail
+cd mcp-servers/gmail
 node dist/index.js auth
 ```
 
@@ -110,8 +110,8 @@ Test the Gmail MCP server by asking Cursor:
 ### MCP Server Not Available
 - Check Cursor logs for errors
 - Verify Node.js path: `which node`
-- Verify the server file exists: `ls -la /Users/markmhendrickson/Projects/personal/mcp-servers/gmail/dist/index.js`
-- Try running manually: `node /Users/markmhendrickson/Projects/personal/mcp-servers/gmail/dist/index.js`
+- Verify the server file exists: `ls -la mcp-servers/gmail/dist/index.js`
+- Try running manually: `node mcp-servers/gmail/dist/index.js`
 
 ### Port 3000 Already in Use
 - The OAuth callback uses port 3000

@@ -3,21 +3,21 @@
     "parquet": {
       "command": "python3",
       "args": [
-        "/Users/markmhendrickson/Projects/personal/mcp-servers/parquet/parquet_mcp_server.py"
+        "$REPO_ROOT/mcp-servers/parquet/parquet_mcp_server.py"
       ],
       "env": {}
     },
     "gmail": {
       "command": "node",
       "args": [
-        "/Users/markmhendrickson/Projects/personal/mcp-servers/gmail/dist/index.js"
+        "$REPO_ROOT/mcp-servers/gmail/dist/index.js"
       ],
       "env": {}
     },
     "minted": {
       "command": "python3",
       "args": [
-        "/Users/markmhendrickson/Projects/personal/mcp-servers/minted/minted_mcp_server.py"
+        "$REPO_ROOT/mcp-servers/minted/minted_mcp_server.py"
       ],
       "env": {}
     }
