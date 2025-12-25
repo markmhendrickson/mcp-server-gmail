@@ -114,16 +114,49 @@ export async function createEmailWithNodemailer(validatedArgs: any): Promise<str
 
     // Prepare attachments for nodemailer
     const attachments = [];
+    const MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024; // 25MB Gmail limit per email
+    const MAX_TOTAL_ATTACHMENTS = 5; // Limit number of attachments
+    
+    if (validatedArgs.attachments.length > MAX_TOTAL_ATTACHMENTS) {
+        throw new Error(`Maximum ${MAX_TOTAL_ATTACHMENTS} attachments allowed per email`);
+    }
+    
+    let totalSize = 0;
     for (const filePath of validatedArgs.attachments) {
-        if (!fs.existsSync(filePath)) {
+        // Security: Validate and normalize file path to prevent directory traversal
+        const normalizedPath = path.normalize(filePath);
+        const resolvedPath = path.resolve(normalizedPath);
+        
+        // Security: Ensure file is within current working directory or subdirectories
+        const cwd = process.cwd();
+        const resolvedCwd = path.resolve(cwd);
+        if (!resolvedPath.startsWith(resolvedCwd)) {
+            throw new Error(`Attachment path must be within current working directory: ${cwd}`);
+        }
+        
+        if (!fs.existsSync(resolvedPath)) {
             throw new Error(`File does not exist: ${filePath}`);
         }
         
-        const fileName = path.basename(filePath);
+        // Security: Check file size
+        const stats = fs.statSync(resolvedPath);
+        if (!stats.isFile()) {
+            throw new Error(`Path is not a file: ${filePath}`);
+        }
+        
+        totalSize += stats.size;
+        if (totalSize > MAX_ATTACHMENT_SIZE) {
+            throw new Error(`Total attachment size (${Math.round(totalSize / 1024 / 1024)}MB) exceeds Gmail limit (25MB)`);
+        }
+        
+        const fileName = path.basename(resolvedPath);
+        
+        // Security: Sanitize filename
+        const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
         
         attachments.push({
-            filename: fileName,
-            path: filePath
+            filename: sanitizedFileName,
+            path: resolvedPath
         });
     }
 

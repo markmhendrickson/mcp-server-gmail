@@ -335,9 +335,11 @@ async function main() {
     const server = new Server({
         name: "gmail",
         version: "1.0.0",
-        capabilities: {
-            tools: {},
-        },
+    });
+
+    // Register tool capabilities before setting handlers
+    server.registerCapabilities({
+        tools: {},
     });
 
     // Tool handlers
@@ -565,7 +567,7 @@ async function main() {
             }
         }
 
-        // Helper function to process operations in batches
+        // Helper function to process operations in batches with rate limiting
         async function processBatches<T, U>(
             items: T[],
             batchSize: number,
@@ -573,6 +575,10 @@ async function main() {
         ): Promise<{ successes: U[], failures: { item: T, error: Error }[] }> {
             const successes: U[] = [];
             const failures: { item: T, error: Error }[] = [];
+            
+            // Rate limiting: delay between batches to avoid hitting Gmail API limits
+            // Gmail API allows ~250 quota units/second, so 50-100ms delay is safe
+            const BATCH_DELAY_MS = 100;
             
             // Process in batches
             for (let i = 0; i < items.length; i += batchSize) {
@@ -590,6 +596,11 @@ async function main() {
                             failures.push({ item, error: itemError as Error });
                         }
                     }
+                }
+                
+                // Rate limiting: add delay between batches (except for the last batch)
+                if (i + batchSize < items.length) {
+                    await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
                 }
             }
             
@@ -1126,9 +1137,26 @@ async function main() {
                         const data = attachmentResponse.data.data;
                         const buffer = Buffer.from(data, 'base64url');
 
+                        // Security: Validate attachment size (Gmail limit is 25MB per email, but individual attachments can be large)
+                        const MAX_ATTACHMENT_SIZE = 50 * 1024 * 1024; // 50MB limit
+                        if (buffer.length > MAX_ATTACHMENT_SIZE) {
+                            throw new Error(`Attachment size (${Math.round(buffer.length / 1024 / 1024)}MB) exceeds maximum allowed size (50MB)`);
+                        }
+
                         // Determine save path and filename
-                        const savePath = validatedArgs.savePath || process.cwd();
+                        // Handle case where savePath might be a full file path or just a directory
+                        let savePath = validatedArgs.savePath || process.cwd();
                         let filename = validatedArgs.filename;
+                        
+                        // Check if savePath is actually a file path (has extension or ends with a filename)
+                        const savePathBasename = path.basename(savePath);
+                        const hasExtension = /\.\w+$/.test(savePathBasename);
+                        
+                        if (hasExtension && !filename) {
+                            // savePath contains a filename, extract it
+                            filename = savePathBasename;
+                            savePath = path.dirname(savePath) || process.cwd();
+                        }
                         
                         if (!filename) {
                             // Get original filename from message if not provided
@@ -1141,7 +1169,7 @@ async function main() {
                             // Find the attachment part to get original filename
                             const findAttachment = (part: any): string | null => {
                                 if (part.body && part.body.attachmentId === validatedArgs.attachmentId) {
-                                    return part.filename || `attachment-${validatedArgs.attachmentId}`;
+                                    return part.filename || `attachment-${validatedArgs.attachmentId.substring(0, 16)}.bin`;
                                 }
                                 if (part.parts) {
                                     for (const subpart of part.parts) {
@@ -1152,16 +1180,33 @@ async function main() {
                                 return null;
                             };
                             
-                            filename = findAttachment(messageResponse.data.payload) || `attachment-${validatedArgs.attachmentId}`;
+                            filename = findAttachment(messageResponse.data.payload) || `attachment-${validatedArgs.attachmentId.substring(0, 16)}.bin`;
+                        }
+
+                        // Security: Validate and normalize paths to prevent directory traversal
+                        const normalizedSavePath = path.normalize(savePath);
+                        const resolvedSavePath = path.resolve(normalizedSavePath);
+                        
+                        // Security: Sanitize filename to prevent path traversal
+                        const sanitizedFilename = path.basename(filename).replace(/[^a-zA-Z0-9._-]/g, '_');
+                        if (!sanitizedFilename || sanitizedFilename === '.' || sanitizedFilename === '..') {
+                            throw new Error('Invalid filename');
+                        }
+
+                        // Security: Ensure save path is within allowed directories (current working directory or subdirectories)
+                        const cwd = process.cwd();
+                        const resolvedCwd = path.resolve(cwd);
+                        if (!resolvedSavePath.startsWith(resolvedCwd)) {
+                            throw new Error(`Save path must be within current working directory: ${cwd}`);
                         }
 
                         // Ensure save directory exists
-                        if (!fs.existsSync(savePath)) {
-                            fs.mkdirSync(savePath, { recursive: true });
+                        if (!fs.existsSync(resolvedSavePath)) {
+                            fs.mkdirSync(resolvedSavePath, { recursive: true });
                         }
 
                         // Write file
-                        const fullPath = path.join(savePath, filename);
+                        const fullPath = path.join(resolvedSavePath, sanitizedFilename);
                         fs.writeFileSync(fullPath, buffer);
 
                         return {
