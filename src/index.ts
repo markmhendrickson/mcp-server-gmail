@@ -19,6 +19,7 @@ import os from 'os';
 import {createEmailMessage, createEmailWithNodemailer} from "./utl.js";
 import { createLabel, updateLabel, deleteLabel, listLabels, findLabelByName, getOrCreateLabel, GmailLabel } from "./label-manager.js";
 import { createFilter, listFilters, getFilter, deleteFilter, filterTemplates, GmailFilterCriteria, GmailFilterAction } from "./filter-manager.js";
+import { createWorker } from 'tesseract.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -317,6 +318,18 @@ const DownloadAttachmentSchema = z.object({
     savePath: z.string().optional().describe("Directory path to save the attachment (defaults to current directory)"),
 });
 
+const ParseImageAttachmentSchema = z.object({
+    messageId: z.string().optional().describe("ID of the email message containing the image attachment (required if attachmentId provided)"),
+    attachmentId: z.string().optional().describe("ID of the image attachment to parse (required if messageId provided)"),
+    imageUrl: z.string().optional().describe("URL of an image to parse (alternative to messageId/attachmentId)"),
+    language: z.string().optional().default('eng').describe("OCR language code (e.g., 'eng', 'spa', 'eng+spa' for multiple languages)"),
+}).refine(
+    (data) => (data.messageId && data.attachmentId) || data.imageUrl,
+    {
+        message: "Either (messageId and attachmentId) or imageUrl must be provided"
+    }
+);
+
 
 // Main function
 async function main() {
@@ -439,6 +452,11 @@ async function main() {
                 name: "download_attachment",
                 description: "Downloads an email attachment to a specified location",
                 inputSchema: zodToJsonSchema(DownloadAttachmentSchema),
+            },
+            {
+                name: "parse_image_attachment",
+                description: "Extracts text from an image attachment using OCR (Optical Character Recognition). Can parse Gmail attachments (provide messageId and attachmentId) or images from URLs (provide imageUrl).",
+                inputSchema: zodToJsonSchema(ParseImageAttachmentSchema),
             },
         ],
     }))
@@ -1223,6 +1241,139 @@ async function main() {
                                 {
                                     type: "text",
                                     text: `Failed to download attachment: ${error.message}`,
+                                },
+                            ],
+                        };
+                    }
+                }
+
+                case "parse_image_attachment": {
+                    const validatedArgs = ParseImageAttachmentSchema.parse(args);
+                    
+                    try {
+                        let buffer: Buffer;
+                        let imageInfo: { mimeType?: string; filename?: string } = {};
+
+                        if (validatedArgs.imageUrl) {
+                            // Download image from URL
+                            const https = await import('https');
+                            const http = await import('http');
+                            const urlModule = await import('url');
+                            
+                            const imageUrl = validatedArgs.imageUrl;
+                            const parsedUrl = urlModule.parse(imageUrl);
+                            const client = parsedUrl.protocol === 'https:' ? https : http;
+
+                            let contentType = 'image/png';
+                            buffer = await new Promise<Buffer>((resolve, reject) => {
+                                const request = client.get(imageUrl, (response) => {
+                                    if (response.statusCode !== 200) {
+                                        reject(new Error(`Failed to download image: HTTP ${response.statusCode}`));
+                                        return;
+                                    }
+
+                                    contentType = response.headers['content-type'] || 'image/png';
+
+                                    const chunks: Buffer[] = [];
+                                    response.on('data', (chunk) => chunks.push(chunk));
+                                    response.on('end', () => resolve(Buffer.concat(chunks)));
+                                    response.on('error', reject);
+                                });
+                                request.on('error', reject);
+                            });
+
+                            // Extract filename from URL
+                            const urlPath = parsedUrl.pathname || '';
+                            const filename = urlPath.split('/').pop() || 'image';
+                            imageInfo = { filename, mimeType: contentType };
+                        } else if (validatedArgs.messageId && validatedArgs.attachmentId) {
+                            // Get the attachment data from Gmail API
+                            const attachmentResponse = await gmail.users.messages.attachments.get({
+                                userId: 'me',
+                                messageId: validatedArgs.messageId,
+                                id: validatedArgs.attachmentId,
+                            });
+
+                            if (!attachmentResponse.data.data) {
+                                throw new Error('No attachment data received');
+                            }
+
+                            // Decode the base64 data
+                            const data = attachmentResponse.data.data;
+                            buffer = Buffer.from(data, 'base64url');
+
+                            // Get attachment metadata to check if it's an image
+                            const messageResponse = await gmail.users.messages.get({
+                                userId: 'me',
+                                id: validatedArgs.messageId,
+                                format: 'full',
+                            });
+
+                            // Find the attachment part to get MIME type
+                            const findAttachment = (part: any): { mimeType?: string; filename?: string } | null => {
+                                if (part.body && part.body.attachmentId === validatedArgs.attachmentId) {
+                                    return {
+                                        mimeType: part.mimeType,
+                                        filename: part.filename
+                                    };
+                                }
+                                if (part.parts) {
+                                    for (const subpart of part.parts) {
+                                        const found = findAttachment(subpart);
+                                        if (found) return found;
+                                    }
+                                }
+                                return null;
+                            };
+
+                            imageInfo = findAttachment(messageResponse.data.payload) || {};
+                        } else {
+                            throw new Error('Either (messageId and attachmentId) or imageUrl must be provided');
+                        }
+
+                        // Security: Validate image size (limit to 10MB for OCR processing)
+                        const MAX_OCR_SIZE = 10 * 1024 * 1024; // 10MB limit
+                        if (buffer.length > MAX_OCR_SIZE) {
+                            throw new Error(`Image size (${Math.round(buffer.length / 1024 / 1024)}MB) exceeds maximum allowed size for OCR (10MB)`);
+                        }
+
+                        const mimeType = imageInfo.mimeType || '';
+                        // Check if it's an image
+                        if (mimeType && !mimeType.startsWith('image/')) {
+                            throw new Error(`File is not an image. MIME type: ${mimeType}`);
+                        }
+
+                        // Initialize Tesseract worker
+                        const worker = await createWorker(validatedArgs.language);
+                        
+                        try {
+                            // Perform OCR
+                            const { data: { text, confidence } } = await worker.recognize(buffer);
+                            
+                            // Terminate worker
+                            await worker.terminate();
+
+                            return {
+                                content: [
+                                    {
+                                        type: "text",
+                                        text: `OCR Results for ${imageInfo.filename || 'image'}:\n` +
+                                            `Confidence: ${Math.round(confidence)}%\n` +
+                                            `Language: ${validatedArgs.language}\n\n` +
+                                            `Extracted Text:\n${text || '(No text found in image)'}`,
+                                    },
+                                ],
+                            };
+                        } catch (ocrError: any) {
+                            await worker.terminate();
+                            throw new Error(`OCR processing failed: ${ocrError.message}`);
+                        }
+                    } catch (error: any) {
+                        return {
+                            content: [
+                                {
+                                    type: "text",
+                                    text: `Failed to parse image: ${error.message}`,
                                 },
                             ],
                         };
