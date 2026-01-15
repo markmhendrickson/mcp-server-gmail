@@ -86,7 +86,7 @@ npx -y @smithery/cli install @gongrzhe/server-gmail-autoauth-mcp --client claude
    - Open your default browser for Google authentication
    - Save credentials as `~/.gmail-mcp/credentials.json`
 
-   > **Note**: 
+   > **Note**:
    > - After successful authentication, credentials are stored globally in `~/.gmail-mcp/` and can be used from any directory
    > - Both Desktop app and Web application credentials are supported
    > - For Web application credentials, make sure to add `http://localhost:3000/oauth2callback` to your authorized redirect URIs

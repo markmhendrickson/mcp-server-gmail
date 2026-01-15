@@ -11,6 +11,7 @@ import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { OAuth2Client } from 'google-auth-library';
 import fs from 'fs';
+import { watchFile, unwatchFile } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import http from 'http';
@@ -59,6 +60,41 @@ interface EmailContent {
 
 // OAuth2 configuration
 let oauth2Client: OAuth2Client;
+
+/**
+ * Watch credentials file for changes and reload automatically
+ */
+function setupCredentialsFileWatcher(): void {
+    try {
+        let lastModified = 0;
+        watchFile(CREDENTIALS_PATH, { interval: 2000 }, (curr, prev) => {
+            // Only reload if file was actually modified (not just accessed)
+            if (curr.mtimeMs > prev.mtimeMs && curr.mtimeMs > lastModified) {
+                lastModified = curr.mtimeMs;
+
+                // Debounce: wait a bit to ensure file write is complete
+                setTimeout(() => {
+                    try {
+                        if (fs.existsSync(CREDENTIALS_PATH)) {
+                            const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
+                            oauth2Client.setCredentials(credentials);
+                            process.stderr.write('Gmail credentials reloaded from file.\n');
+                        }
+                    } catch (error) {
+                        process.stderr.write(`Error reloading Gmail credentials: ${error instanceof Error ? error.message : String(error)}\n`);
+                    }
+                }, 500); // 500ms debounce
+            }
+        });
+
+        process.stderr.write(`Watching Gmail credentials file for changes: ${CREDENTIALS_PATH}\n`);
+    } catch (error) {
+        // File might not exist yet, that's okay - watcher will be set up when file is created
+        if (error instanceof Error && 'code' in error && error.code !== 'ENOENT') {
+            process.stderr.write(`Warning: Could not set up Gmail credentials file watcher: ${error.message}\n`);
+        }
+    }
+}
 
 /**
  * Recursively extract email body content from MIME message parts
@@ -124,8 +160,8 @@ async function loadCredentials() {
             process.exit(1);
         }
 
-        const callback = process.argv[2] === 'auth' && process.argv[3] 
-        ? process.argv[3] 
+        const callback = process.argv[2] === 'auth' && process.argv[3]
+        ? process.argv[3]
         : "http://localhost:3000/oauth2callback";
 
         oauth2Client = new OAuth2Client(
@@ -138,6 +174,9 @@ async function loadCredentials() {
             const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
             oauth2Client.setCredentials(credentials);
         }
+
+        // Set up file watcher to reload credentials when file changes
+        setupCredentialsFileWatcher();
     } catch (error) {
         console.error('Error loading credentials:', error);
         process.exit(1);
@@ -466,13 +505,13 @@ async function main() {
 
         async function handleEmailAction(action: "send" | "draft", validatedArgs: any) {
             let message: string;
-            
+
             try {
                 // Check if we have attachments
                 if (validatedArgs.attachments && validatedArgs.attachments.length > 0) {
                     // Use Nodemailer to create properly formatted RFC822 message
                     message = await createEmailWithNodemailer(validatedArgs);
-                    
+
                     if (action === "send") {
                         const encodedMessage = Buffer.from(message).toString('base64')
                             .replace(/\+/g, '-')
@@ -486,7 +525,7 @@ async function main() {
                                 ...(validatedArgs.threadId && { threadId: validatedArgs.threadId })
                             }
                         });
-                        
+
                         return {
                             content: [
                                 {
@@ -501,12 +540,12 @@ async function main() {
                             .replace(/\+/g, '-')
                             .replace(/\//g, '_')
                             .replace(/=+$/, '');
-                        
+
                         const messageRequest = {
                             raw: encodedMessage,
                             ...(validatedArgs.threadId && { threadId: validatedArgs.threadId })
                         };
-                        
+
                         const response = await gmail.users.drafts.create({
                             userId: 'me',
                             requestBody: {
@@ -525,7 +564,7 @@ async function main() {
                 } else {
                     // For emails without attachments, use the existing simple method
                     message = createEmailMessage(validatedArgs);
-                    
+
                     const encodedMessage = Buffer.from(message).toString('base64')
                         .replace(/\+/g, '-')
                         .replace(/\//g, '_')
@@ -593,11 +632,11 @@ async function main() {
         ): Promise<{ successes: U[], failures: { item: T, error: Error }[] }> {
             const successes: U[] = [];
             const failures: { item: T, error: Error }[] = [];
-            
+
             // Rate limiting: delay between batches to avoid hitting Gmail API limits
             // Gmail API allows ~250 quota units/second, so 50-100ms delay is safe
             const BATCH_DELAY_MS = 100;
-            
+
             // Process in batches
             for (let i = 0; i < items.length; i += batchSize) {
                 const batch = items.slice(i, i + batchSize);
@@ -615,13 +654,13 @@ async function main() {
                         }
                     }
                 }
-                
+
                 // Rate limiting: add delay between batches (except for the last batch)
                 if (i + batchSize < items.length) {
                     await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
                 }
             }
-            
+
             return { successes, failures };
         }
 
@@ -741,22 +780,22 @@ async function main() {
                 // Updated implementation for the modify_email handler
                 case "modify_email": {
                     const validatedArgs = ModifyEmailSchema.parse(args);
-                    
+
                     // Prepare request body
                     const requestBody: any = {};
-                    
+
                     if (validatedArgs.labelIds) {
                         requestBody.addLabelIds = validatedArgs.labelIds;
                     }
-                    
+
                     if (validatedArgs.addLabelIds) {
                         requestBody.addLabelIds = validatedArgs.addLabelIds;
                     }
-                    
+
                     if (validatedArgs.removeLabelIds) {
                         requestBody.removeLabelIds = validatedArgs.removeLabelIds;
                     }
-                    
+
                     await gmail.users.messages.modify({
                         userId: 'me',
                         id: validatedArgs.messageId,
@@ -813,14 +852,14 @@ async function main() {
                     const validatedArgs = BatchModifyEmailsSchema.parse(args);
                     const messageIds = validatedArgs.messageIds;
                     const batchSize = validatedArgs.batchSize || 50;
-                    
+
                     // Prepare request body
                     const requestBody: any = {};
-                    
+
                     if (validatedArgs.addLabelIds) {
                         requestBody.addLabelIds = validatedArgs.addLabelIds;
                     }
-                    
+
                     if (validatedArgs.removeLabelIds) {
                         requestBody.removeLabelIds = validatedArgs.removeLabelIds;
                     }
@@ -847,10 +886,10 @@ async function main() {
                     // Generate summary of the operation
                     const successCount = successes.length;
                     const failureCount = failures.length;
-                    
+
                     let resultText = `Batch label modification complete.\n`;
                     resultText += `Successfully processed: ${successCount} messages\n`;
-                    
+
                     if (failureCount > 0) {
                         resultText += `Failed to process: ${failureCount} messages\n\n`;
                         resultText += `Failed message IDs:\n`;
@@ -893,10 +932,10 @@ async function main() {
                     // Generate summary of the operation
                     const successCount = successes.length;
                     const failureCount = failures.length;
-                    
+
                     let resultText = `Batch delete operation complete.\n`;
                     resultText += `Successfully deleted: ${successCount} messages\n`;
-                    
+
                     if (failureCount > 0) {
                         resultText += `Failed to delete: ${failureCount} messages\n\n`;
                         resultText += `Failed message IDs:\n`;
@@ -933,13 +972,13 @@ async function main() {
 
                 case "update_label": {
                     const validatedArgs = UpdateLabelSchema.parse(args);
-                    
+
                     // Prepare request body with only the fields that were provided
                     const updates: any = {};
                     if (validatedArgs.name) updates.name = validatedArgs.name;
                     if (validatedArgs.messageListVisibility) updates.messageListVisibility = validatedArgs.messageListVisibility;
                     if (validatedArgs.labelListVisibility) updates.labelListVisibility = validatedArgs.labelListVisibility;
-                    
+
                     const result = await updateLabel(gmail, validatedArgs.id, updates);
 
                     return {
@@ -974,7 +1013,7 @@ async function main() {
                     });
 
                     const action = result.type === 'user' && result.name === validatedArgs.name ? 'found existing' : 'created new';
-                    
+
                     return {
                         content: [
                             {
@@ -1033,7 +1072,7 @@ async function main() {
                             .filter(([_, value]) => value !== undefined)
                             .map(([key, value]) => `${key}: ${value}`)
                             .join(', ');
-                        
+
                         const actionEntries = Object.entries(filter.action || {})
                             .filter(([_, value]) => value !== undefined && (Array.isArray(value) ? value.length > 0 : true))
                             .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`)
@@ -1060,7 +1099,7 @@ async function main() {
                         .filter(([_, value]) => value !== undefined)
                         .map(([key, value]) => `${key}: ${value}`)
                         .join(', ');
-                    
+
                     const actionText = Object.entries(result.action || {})
                         .filter(([_, value]) => value !== undefined && (Array.isArray(value) ? value.length > 0 : true))
                         .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`)
@@ -1096,7 +1135,7 @@ async function main() {
                     const params = validatedArgs.parameters;
 
                     let filterConfig;
-                    
+
                     switch (template) {
                         case 'fromSender':
                             if (!params.senderEmail) throw new Error("senderEmail is required for fromSender template");
@@ -1138,7 +1177,7 @@ async function main() {
                 }
                 case "download_attachment": {
                     const validatedArgs = DownloadAttachmentSchema.parse(args);
-                    
+
                     try {
                         // Get the attachment data from Gmail API
                         const attachmentResponse = await gmail.users.messages.attachments.get({
@@ -1165,17 +1204,17 @@ async function main() {
                         // Handle case where savePath might be a full file path or just a directory
                         let savePath = validatedArgs.savePath || process.cwd();
                         let filename = validatedArgs.filename;
-                        
+
                         // Check if savePath is actually a file path (has extension or ends with a filename)
                         const savePathBasename = path.basename(savePath);
                         const hasExtension = /\.\w+$/.test(savePathBasename);
-                        
+
                         if (hasExtension && !filename) {
                             // savePath contains a filename, extract it
                             filename = savePathBasename;
                             savePath = path.dirname(savePath) || process.cwd();
                         }
-                        
+
                         if (!filename) {
                             // Get original filename from message if not provided
                             const messageResponse = await gmail.users.messages.get({
@@ -1183,7 +1222,7 @@ async function main() {
                                 id: validatedArgs.messageId,
                                 format: 'full',
                             });
-                            
+
                             // Find the attachment part to get original filename
                             const findAttachment = (part: any): string | null => {
                                 if (part.body && part.body.attachmentId === validatedArgs.attachmentId) {
@@ -1197,14 +1236,14 @@ async function main() {
                                 }
                                 return null;
                             };
-                            
+
                             filename = findAttachment(messageResponse.data.payload) || `attachment-${validatedArgs.attachmentId.substring(0, 16)}.bin`;
                         }
 
                         // Security: Validate and normalize paths to prevent directory traversal
                         const normalizedSavePath = path.normalize(savePath);
                         const resolvedSavePath = path.resolve(normalizedSavePath);
-                        
+
                         // Security: Sanitize filename to prevent path traversal
                         const sanitizedFilename = path.basename(filename).replace(/[^a-zA-Z0-9._-]/g, '_');
                         if (!sanitizedFilename || sanitizedFilename === '.' || sanitizedFilename === '..') {
@@ -1249,7 +1288,7 @@ async function main() {
 
                 case "parse_image_attachment": {
                     const validatedArgs = ParseImageAttachmentSchema.parse(args);
-                    
+
                     try {
                         let buffer: Buffer;
                         let imageInfo: { mimeType?: string; filename?: string } = {};
@@ -1259,7 +1298,7 @@ async function main() {
                             const https = await import('https');
                             const http = await import('http');
                             const urlModule = await import('url');
-                            
+
                             const imageUrl = validatedArgs.imageUrl;
                             const parsedUrl = urlModule.parse(imageUrl);
                             const client = parsedUrl.protocol === 'https:' ? https : http;
@@ -1345,11 +1384,11 @@ async function main() {
 
                         // Initialize Tesseract worker
                         const worker = await createWorker(validatedArgs.language);
-                        
+
                         try {
                             // Perform OCR
                             const { data: { text, confidence } } = await worker.recognize(buffer);
-                            
+
                             // Terminate worker
                             await worker.terminate();
 
