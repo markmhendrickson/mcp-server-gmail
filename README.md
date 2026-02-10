@@ -733,7 +733,7 @@ The server includes efficient batch processing capabilities:
    - For web applications, verify the redirect URI is correctly configured
 
 3. **Port Already in Use**
-   - If port 3000 is already in use, please free it up before running authentication
+   - If port 3000 is already in use (e.g. by markmhendrickson website), stop that process before running Gmail auth.
    - You can find and stop the process using that port
 
 4. **Batch Operation Failures**

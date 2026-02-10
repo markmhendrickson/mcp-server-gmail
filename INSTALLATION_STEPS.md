@@ -114,7 +114,7 @@ Test the Gmail MCP server by asking Cursor:
 - Try running manually: `node mcp-servers/gmail/dist/index.js`
 
 ### Port 3000 Already in Use
-- The OAuth callback uses port 3000
+- The OAuth callback uses port 3000. Stop any other process using port 3000 (e.g. markmhendrickson website) before auth.
 - If another service is using it, stop that service or modify the code to use a different port
 
 ## Files Created
