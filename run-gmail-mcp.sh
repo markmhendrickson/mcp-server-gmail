@@ -38,9 +38,25 @@ if [ -f "$REPO_ROOT/.env" ]; then
     set +a
 fi
 
-# Set credential paths to repo .creds directory (never use ~/.local defaults)
-export GMAIL_OAUTH_PATH="$REPO_ROOT/.creds/gcp-oauth.keys.json"
-export GMAIL_CREDENTIALS_PATH="$REPO_ROOT/.creds/gmail-credentials.json"
+# Credential paths: prefer repo .creds/ when present; else ~/.gmail-mcp (standard install).
+GMAIL_MCP_HOME="${GMAIL_MCP_HOME:-$HOME/.gmail-mcp}"
+REPO_CREDS="$REPO_ROOT/.creds"
+if [ -f "$REPO_CREDS/gcp-oauth.keys.json" ]; then
+    export GMAIL_OAUTH_PATH="$REPO_CREDS/gcp-oauth.keys.json"
+elif [ -f "$GMAIL_MCP_HOME/gcp-oauth.keys.json" ]; then
+    export GMAIL_OAUTH_PATH="$GMAIL_MCP_HOME/gcp-oauth.keys.json"
+else
+    export GMAIL_OAUTH_PATH="$REPO_CREDS/gcp-oauth.keys.json"
+fi
+if [ -f "$REPO_CREDS/gmail-credentials.json" ]; then
+    export GMAIL_CREDENTIALS_PATH="$REPO_CREDS/gmail-credentials.json"
+elif [ -f "$REPO_CREDS/credentials.json" ]; then
+    export GMAIL_CREDENTIALS_PATH="$REPO_CREDS/credentials.json"
+elif [ -f "$GMAIL_MCP_HOME/credentials.json" ]; then
+    export GMAIL_CREDENTIALS_PATH="$GMAIL_MCP_HOME/credentials.json"
+else
+    export GMAIL_CREDENTIALS_PATH="$REPO_CREDS/gmail-credentials.json"
+fi
 
 # Check if server is built
 if [ ! -f "$SCRIPT_DIR/dist/index.js" ]; then
